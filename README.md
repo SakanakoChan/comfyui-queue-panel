@@ -6,6 +6,18 @@ A small custom node that re-adds (and optimizes) the original **Queue** sidebar 
 
 Newer ComfyUI frontends dropped the old **Queue** panel — the one that listed your running / pending / finished tasks and let you browse their images. This extension brings it back **without touching the ComfyUI frontend package or any core files**: it just registers a sidebar tab through the still-supported extension API, so it keeps working across frontend updates and **never** requires downgrading. ✅
 
+## 📸 Screenshots
+
+Tasks grouped by Running / Pending / History (**List**), or a flat newest-first grid of every image (**Feed**):
+
+| 📋 List view | 🖼️ Feed view |
+| --- | --- |
+| <img src="https://github.com/user-attachments/assets/275e7e39-4691-4c13-ab19-e6b7696c38d3" alt="List view" width="320"> | <img src="https://github.com/user-attachments/assets/712ba441-5f11-42a7-a4e9-5b41add7cc75" alt="Feed view" width="320"> |
+
+**🔍 Big image preview** — click any thumbnail for a fullscreen lightbox with navigation:
+
+<img src="https://github.com/user-attachments/assets/8fe714f5-6b6c-40d9-b7b8-40e8e68fd507" alt="Big image preview" width="820">
+
 ## ✨ Features
 
 - 🧷 **Queue sidebar tab** with three sections: **Running**, **Pending**, and **History**.
