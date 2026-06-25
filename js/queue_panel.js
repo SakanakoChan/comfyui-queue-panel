@@ -3,6 +3,7 @@ import { api } from "../../scripts/api.js";
 
 const STYLE_ID = "comfy-queue-panel-style";
 const VIEW_KEY = "cqp.view";
+const STARTTIMES_KEY = "cqp.startTimes";
 const MAXITEMS_KEY = "cqp.maxItems";
 const FEEDMAX_KEY = "cqp.feedMax";
 const LBSIZE_KEY = "cqp.lbSize";
@@ -41,6 +42,7 @@ const CSS = `
 .cqp-thumb-ph{width:48px;height:48px;flex:0 0 auto;border-radius:4px;background:#111;display:flex;align-items:center;justify-content:center;color:#555;font-size:16px;}
 .cqp-meta{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:2px;}
 .cqp-pid{font-family:monospace;font-size:0.85em;color:var(--descrip-text,#888);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.cqp-timer{color:var(--descrip-text,#9aa);font-variant-numeric:tabular-nums;}
 .cqp-line{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .cqp-actions{display:flex;gap:4px;flex:0 0 auto;}
 .cqp-progress{height:4px;border-radius:2px;background:#333;overflow:hidden;margin-top:2px;}
@@ -62,7 +64,7 @@ const CSS = `
 .cqp-lb-nav:hover{background:rgba(0,0,0,.6);}
 .cqp-lb-prev{left:16px;}
 .cqp-lb-next{right:16px;}
-.cqp-lb-bar{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:10px 14px;background:rgba(0,0,0,.5);}
+.cqp-lb-bar{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:10px 14px;}
 .cqp-lb-counter{color:#ddd;font-family:monospace;}
 `;
 
@@ -147,6 +149,15 @@ async function loadWorkflow(wf) {
 
 const state = { progress: { value: 0, max: 0 }, runningNode: null };
 let activeScroll = null;
+const startTimes = (() => { try { return JSON.parse(localStorage.getItem(STARTTIMES_KEY)) || {}; } catch (e) { return {}; } })();
+function persistStartTimes() { try { localStorage.setItem(STARTTIMES_KEY, JSON.stringify(startTimes)); } catch (e) {} }
+function pruneStartTimes(queue) {
+  const live = new Set();
+  for (const arr of [queue.queue_running || [], queue.queue_pending || []]) for (const it of arr) live.add(it[1]);
+  let changed = false;
+  for (const pid of Object.keys(startTimes)) if (!live.has(pid)) { delete startTimes[pid]; changed = true; }
+  if (changed) persistStartTimes();
+}
 let cacheQueue = null;
 let cacheHistory = null;
 
@@ -238,6 +249,36 @@ function updateProgressUI() {
   if (nodeEl && state.runningNode != null) nodeEl.textContent = "Executing node " + state.runningNode;
 }
 
+function fmtDur(sec) {
+  return Math.max(0, Math.floor(sec)) + "s";
+}
+function runningElapsed(pid) {
+  if (!startTimes[pid]) startTimes[pid] = Date.now();
+  return Math.floor((Date.now() - startTimes[pid]) / 1000);
+}
+function historyDuration(entry) {
+  const msgs = entry && entry.status && entry.status.messages;
+  if (!Array.isArray(msgs)) return null;
+  let start = null, end = null;
+  for (const m of msgs) {
+    if (!Array.isArray(m) || m.length < 2) continue;
+    const ev = m[0];
+    const ts = m[1] && m[1].timestamp;
+    if (typeof ts !== "number") continue;
+    if (ev === "execution_start") start = ts;
+    else if (ev === "execution_success" || ev === "execution_error" || ev === "execution_interrupted") end = ts;
+  }
+  if (start == null || end == null || end < start) return null;
+  return Math.round((end - start) / 1000);
+}
+function updateTimers() {
+  if (!activeScroll || !document.contains(activeScroll)) return;
+  activeScroll.querySelectorAll(".cqp-timer.cqp-running").forEach((el) => {
+    const pid = el.getAttribute("data-pid");
+    if (pid) el.textContent = fmtDur(runningElapsed(pid));
+  });
+}
+
 const LIVE_MAX = 300;
 const liveImages = [];
 const liveSeen = new Set();
@@ -272,9 +313,64 @@ function liveWf(pid) {
   return null;
 }
 
+let badgeCount = 0;
+const BADGE_CLASS = "cqp-tab-badge sidebar-icon-badge absolute min-w-[16px] px-1 rounded-full bg-primary-background py-0.25 text-2xs leading-[14px] font-medium text-base-foreground";
+function updateQueueBadge() {
+  const btn = document.querySelector(".queue-tab-button");
+  if (!btn) return;
+  const container = btn.querySelector(".side-bar-button-icon-container") || btn;
+  if (container === btn) btn.style.position = "relative";
+  let badge = container.querySelector(".cqp-tab-badge");
+  const active = btn.classList.contains("side-bar-button-selected");
+  if (badgeCount > 0 && !active) {
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = BADGE_CLASS;
+      badge.style.top = "2px";
+      badge.style.right = "2px";
+      badge.style.textAlign = "center";
+      container.appendChild(badge);
+    }
+    badge.textContent = String(badgeCount);
+  } else if (badge) {
+    badge.remove();
+  }
+}
+
+let badgeObserver = null;
+let observedTabButton = null;
+function ensureBadgeObserver() {
+  const btn = document.querySelector(".queue-tab-button");
+  if (btn && btn !== observedTabButton) {
+    if (badgeObserver) badgeObserver.disconnect();
+    observedTabButton = btn;
+    badgeObserver = new MutationObserver(updateQueueBadge);
+    badgeObserver.observe(btn, { attributes: true, attributeFilter: ["class"] });
+  }
+  updateQueueBadge();
+}
+
+async function refreshBadgeCount() {
+  try {
+    const res = await api.fetchApi("/prompt");
+    const data = await res.json();
+    badgeCount = data?.exec_info?.queue_remaining || 0;
+    ensureBadgeObserver();
+  } catch (e) {}
+}
+
 function setupGlobalListeners(onData) {
-  api.addEventListener("status", onData);
-  api.addEventListener("execution_start", () => { state.progress = { value: 0, max: 0 }; onData(); });
+  api.addEventListener("status", (e) => {
+    badgeCount = e?.detail?.exec_info?.queue_remaining || 0;
+    updateQueueBadge();
+    onData();
+  });
+  api.addEventListener("execution_start", (e) => {
+    state.progress = { value: 0, max: 0 };
+    const pid = e?.detail?.prompt_id;
+    if (pid) { startTimes[pid] = Date.now(); persistStartTimes(); }
+    onData();
+  });
   api.addEventListener("execution_success", onData);
   api.addEventListener("execution_error", onData);
   api.addEventListener("execution_interrupted", onData);
@@ -302,9 +398,15 @@ function renderRunning(scroll, running) {
   }
   running.forEach((item, idx) => {
     const pid = item[1];
+    if (!startTimes[pid]) {
+      const ct = extraOf(item) && extraOf(item).create_time;
+      startTimes[pid] = typeof ct === "number" ? ct : Date.now();
+      persistStartTimes();
+    }
     const meta = h("div", { class: "cqp-meta" }, [
       h("div", { class: "cqp-line cqp-run-node", text: idx === 0 && state.runningNode != null ? "Executing node " + state.runningNode : "Executing\u2026" }),
       h("div", { class: "cqp-pid", text: pid }),
+      h("div", { class: "cqp-line cqp-timer cqp-running", "data-pid": pid, text: fmtDur(runningElapsed(pid)) }),
     ]);
     if (idx === 0) {
       const pct = state.progress.max > 0 ? Math.min(100, Math.round((state.progress.value / state.progress.max) * 100)) : 0;
@@ -366,10 +468,11 @@ function renderHistoryList(scroll, history, refresh) {
     const items = itemsFromImages(imgs, pid, wf);
     const statusStr = entry.status && entry.status.status_str;
     const ok = statusStr ? statusStr === "success" : true;
+    const dur = historyDuration(entry);
 
     const head = h("div", { class: "cqp-card-head" }, [
       h("div", { class: "cqp-meta" }, [
-        h("div", { class: "cqp-line " + (ok ? "cqp-done" : "cqp-fail"), text: (statusStr || (ok ? "completed" : "unknown")) + (imgs.length ? "  \u00B7 " + imgs.length + " img" : "") }),
+        h("div", { class: "cqp-line " + (ok ? "cqp-done" : "cqp-fail"), text: (statusStr || (ok ? "completed" : "unknown")) + (imgs.length ? "  \u00B7 " + imgs.length + " img" : "") + (dur != null ? "  \u00B7 " + fmtDur(dur) : "") }),
         h("div", { class: "cqp-pid", text: pid }),
       ]),
       h("div", { class: "cqp-actions" }, [
@@ -510,6 +613,7 @@ function mountPanel(el) {
       ]);
       cacheQueue = queue;
       cacheHistory = history;
+      pruneStartTimes(queue);
       const sig = signature(queue, history, getView());
       if (sig === lastSig) return;
       lastSig = sig;
@@ -590,7 +694,6 @@ function mountPanel(el) {
     h("span", { class: "cqp-title", text: "Queue" }),
     h("div", { class: "cqp-seg" }, [btnList, btnFeed]),
     gear,
-    h("button", { class: "cqp-btn", text: "Refresh", onClick: () => { lastSig = null; refresh({ force: true }); } }),
   ]);
 
   const root = h("div", { class: "cqp-root" }, [toolbar, settingsRow, scroll]);
@@ -639,5 +742,9 @@ app.registerExtension({
       },
     });
     setupGlobalListeners(() => sharedRefresh && sharedRefresh());
+    ensureBadgeObserver();
+    refreshBadgeCount();
+    setInterval(ensureBadgeObserver, 1500);
+    setInterval(updateTimers, 1000);
   },
 });
