@@ -147,6 +147,31 @@ async function loadWorkflow(wf) {
   }
 }
 
+async function workflowFromImage(url, filename) {
+  try {
+    const pnginfo = (typeof window !== "undefined" && window.comfyAPI && window.comfyAPI.pnginfo) || {};
+    const res = await fetch(url);
+    const blob = await res.blob();
+    const file = new File([blob], filename || "image.png", { type: blob.type });
+    const name = (filename || "").toLowerCase();
+    let meta = null;
+    if (name.endsWith(".webp") && pnginfo.getWebpMetadata) meta = await pnginfo.getWebpMetadata(file);
+    else if (name.endsWith(".avif") && pnginfo.getAvifMetadata) meta = await pnginfo.getAvifMetadata(file);
+    else if (pnginfo.getPngMetadata) meta = await pnginfo.getPngMetadata(file);
+    if (meta && meta.workflow) return JSON.parse(meta.workflow);
+  } catch (e) {
+    console.error("[QueuePanel] workflowFromImage failed", e);
+  }
+  return null;
+}
+async function lbLoadWorkflow() {
+  if (lb.wf) { loadWorkflow(lb.wf); return; }
+  const it = lb.items[lb.index];
+  const wf = it ? await workflowFromImage(it.url, it.filename) : null;
+  if (wf) loadWorkflow(wf);
+  else app.extensionManager?.toast?.add?.({ severity: "warn", summary: "Queue", detail: "No workflow found in this image", life: 3000 });
+}
+
 const state = { progress: { value: 0, max: 0 }, runningNode: null };
 let activeScroll = null;
 const startTimes = (() => { try { return JSON.parse(localStorage.getItem(STARTTIMES_KEY)) || {}; } catch (e) { return {}; } })();
@@ -207,7 +232,7 @@ function ensureLightbox() {
   const bar = h("div", { class: "cqp-lb-bar" }, [
     counter,
     h("span", { class: "cqp-spacer" }),
-    h("button", { class: "cqp-btn", text: "Load workflow", onClick: (e) => { e.stopPropagation(); loadWorkflow(lb.wf); } }),
+    h("button", { class: "cqp-btn", text: "Load workflow", onClick: (e) => { e.stopPropagation(); lbLoadWorkflow(); } }),
     h("button", { class: "cqp-btn", text: "Open", onClick: (e) => { e.stopPropagation(); const it = lb.items[lb.index]; if (it) window.open(it.url, "_blank"); } }),
     dl,
     h("button", { class: "cqp-btn cqp-danger", text: "Close", onClick: (e) => { e.stopPropagation(); lbClose(); } }),
@@ -529,7 +554,7 @@ function renderFeed(scroll, history) {
   if (live) {
     for (let i = liveImages.length - 1; i >= 0 && !full; i--) {
       const im = liveImages[i];
-      pushImg({ url: im.url, filename: im.filename, pid: im.pid, wf: liveWf(im.pid), key: im.key });
+      pushImg({ url: im.url, filename: im.filename, pid: im.pid, wf: liveWf(im.pid) || (history[im.pid] ? workflowOf(extraOf(history[im.pid].prompt)) : null), key: im.key });
     }
   }
   for (const [pid, entry] of Object.entries(history).reverse()) {
