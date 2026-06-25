@@ -18,16 +18,23 @@ Tasks grouped by Running / Pending / History (**List**), or a flat newest-first 
 
 <img src="https://github.com/user-attachments/assets/8fe714f5-6b6c-40d9-b7b8-40e8e68fd507" alt="Big image preview" width="820">
 
+**🟥 Clear pending button** — re-added next to **Run**: the **X** interrupts the current task, the **red square** cancels all queued tasks:
+
+<img src="https://github.com/user-attachments/assets/f7687523-cf61-408c-aeba-f4d8b5056ac6" alt="Clear pending button" width="380">
+
 ## ✨ Features
 
 - 🧷 **Queue sidebar tab** with three sections: **Running**, **Pending**, and **History**.
 - 🎮 **Task controls** — cancel a running task, delete/clear pending tasks, delete/clear history, and load any task's workflow back onto the canvas.
+- 🟥 **"Clear pending" button** next to **Run** — re-adds the red square that newer frontends removed, cancelling all queued tasks at once (the running one keeps going).
+- 🔢 **Queue badge** — a count on the sidebar Queue icon showing running + pending tasks (hidden while the Queue tab is open).
+- ⏱️ **Per-task timer** — running tasks show live elapsed time (updates every second); finished or interrupted tasks show their total run time, accurate to the second and preserved across browser refreshes.
 - 🔀 **Two views** (toggle in the toolbar, remembered between sessions):
   - 📋 **List** — tasks grouped by Running / Pending / History; each history task shows a thumbnail strip of **all** its images (including intermediate `PreviewImage` outputs).
   - 🖼️ **Feed** — a flat, newest-first grid of every recent image, like a classic image feed.
 - 🔍 **Lightbox viewer** — click any thumbnail to open a fullscreen viewer with:
   - previous / next navigation (buttons or `←` / `→`), `Esc` or click-backdrop to close,
-  - **Open** (original in a new tab), **Download**, **Load workflow**, and an image counter.
+  - **Open** (original in a new tab), **Download**, an image counter, and **Load workflow** — which also reads the workflow embedded in the image itself when needed, just like dragging the image onto the canvas.
 - ⚡ **Live feed** (optional) — capture preview images into the Feed *while a task is still running*, instead of waiting for it to finish.
 - 🔄 Auto-refreshes from WebSocket events plus a light poll, with change detection to avoid flicker and an in-session cache so reopening the panel is instant.
 
@@ -68,9 +75,10 @@ The **Queue** icon will show up in the left sidebar. 🎉
 
 ## 🚀 Usage
 
-- Open the **Queue** tab from the left sidebar.
-- Use the toolbar to switch between **List** / **Feed**, open the gear ⚙️ for settings, or hit **Refresh**.
+- Open the **Queue** tab from the left sidebar — the count badge on its icon shows how many tasks are running / queued.
+- Use the toolbar to switch between **List** / **Feed**, or open the gear ⚙️ for settings.
 - Click any image to open the lightbox; browse with the arrows or `←` / `→`.
+- Hit the red square next to **Run** to cancel all pending tasks at once.
 - Tweak limits, sizes, and the live feed in the gear panel — changes apply immediately.
 
 ## 🔧 How it works
