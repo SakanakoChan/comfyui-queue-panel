@@ -359,6 +359,26 @@ async function refreshBadgeCount() {
   } catch (e) {}
 }
 
+function clearPending() {
+  post("/queue", { clear: true });
+}
+function ensureClearPendingButton() {
+  const xIcon = document.querySelector('.actionbar-container i[class~="icon-[lucide--x]"]') || document.querySelector('i[class~="icon-[lucide--x]"]');
+  const interruptBtn = xIcon ? xIcon.closest("button") : null;
+  if (!interruptBtn || !interruptBtn.parentElement) return;
+  if (interruptBtn.parentElement.querySelector(".cqp-clear-pending")) return;
+  const ours = interruptBtn.cloneNode(true);
+  ours.classList.add("cqp-clear-pending");
+  ours.removeAttribute("disabled");
+  ours.disabled = false;
+  ours.setAttribute("aria-label", "Clear pending");
+  ours.setAttribute("title", "Clear pending (cancel all queued)");
+  const i = ours.querySelector("i");
+  if (i) i.className = i.className.replace("icon-[lucide--x]", "icon-[lucide--square]");
+  ours.addEventListener("click", (e) => { e.preventDefault(); e.stopPropagation(); clearPending(); });
+  interruptBtn.after(ours);
+}
+
 function setupGlobalListeners(onData) {
   api.addEventListener("status", (e) => {
     badgeCount = e?.detail?.exec_info?.queue_remaining || 0;
@@ -744,7 +764,9 @@ app.registerExtension({
     setupGlobalListeners(() => sharedRefresh && sharedRefresh());
     ensureBadgeObserver();
     refreshBadgeCount();
+    ensureClearPendingButton();
     setInterval(ensureBadgeObserver, 1500);
     setInterval(updateTimers, 1000);
+    setInterval(ensureClearPendingButton, 1500);
   },
 });
