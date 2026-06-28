@@ -65,6 +65,10 @@ const CSS = `
 .cqp-lb-prev{left:16px;}
 .cqp-lb-next{right:16px;}
 .cqp-lb-bar{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;gap:8px;padding:10px 14px;}
+.cqp-ctxmenu{position:fixed;z-index:10001;min-width:150px;background:var(--comfy-menu-bg,#1e1e1e);border:1px solid var(--border-color,#444);border-radius:6px;padding:4px;box-shadow:0 4px 16px rgba(0,0,0,.5);font-size:13px;color:var(--input-text,#ddd);display:none;}
+.cqp-ctxmenu.open{display:block;}
+.cqp-ctxmenu-item{padding:6px 10px;border-radius:4px;cursor:pointer;white-space:nowrap;}
+.cqp-ctxmenu-item:hover{background:var(--p-primary-color,#4a90d9);color:#fff;}
 .cqp-lb-counter{color:#ddd;font-family:monospace;}
 `;
 
@@ -164,12 +168,63 @@ async function workflowFromImage(url, filename) {
   }
   return null;
 }
-async function lbLoadWorkflow() {
-  if (lb.wf) { loadWorkflow(lb.wf); return; }
-  const it = lb.items[lb.index];
-  const wf = it ? await workflowFromImage(it.url, it.filename) : null;
+async function loadWorkflowForItem(item) {
+  if (!item) return;
+  if (item.wf) { loadWorkflow(item.wf); return; }
+  const wf = await workflowFromImage(item.url, item.filename);
   if (wf) loadWorkflow(wf);
   else app.extensionManager?.toast?.add?.({ severity: "warn", summary: "Queue", detail: "No workflow found in this image", life: 3000 });
+}
+function lbLoadWorkflow() { return loadWorkflowForItem(lb.items[lb.index]); }
+function downloadUrl(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "image";
+  a.target = "_blank";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+const ctxMenu = { el: null, closer: null, keyer: null, scroller: null };
+function closeCtxMenu() {
+  if (ctxMenu.el) ctxMenu.el.classList.remove("open");
+  if (ctxMenu.closer) { document.removeEventListener("pointerdown", ctxMenu.closer, true); ctxMenu.closer = null; }
+  if (ctxMenu.keyer) { window.removeEventListener("keydown", ctxMenu.keyer); ctxMenu.keyer = null; }
+  if (ctxMenu.scroller) { window.removeEventListener("scroll", ctxMenu.scroller, true); ctxMenu.scroller = null; }
+}
+function ensureCtxMenu() {
+  if (ctxMenu.el) return ctxMenu.el;
+  injectStyle();
+  ctxMenu.el = h("div", { class: "cqp-ctxmenu" });
+  document.body.appendChild(ctxMenu.el);
+  return ctxMenu.el;
+}
+function openImageMenu(x, y, opts) {
+  const item = opts && opts.item;
+  if (!item) return;
+  closeCtxMenu();
+  const el = ensureCtxMenu();
+  el.innerHTML = "";
+  const addItem = (label, fn) => {
+    el.appendChild(h("div", { class: "cqp-ctxmenu-item", text: label, onClick: (e) => { e.stopPropagation(); closeCtxMenu(); fn(); } }));
+  };
+  if (opts.allowView && opts.list) addItem("View", () => openLightbox(opts.list, opts.index));
+  addItem("Load workflow", () => loadWorkflowForItem(item));
+  addItem("Open", () => window.open(item.url, "_blank"));
+  addItem("Download", () => downloadUrl(item.url, item.filename));
+  el.classList.add("open");
+  const w = el.offsetWidth, hgt = el.offsetHeight;
+  el.style.left = Math.max(4, Math.min(x, window.innerWidth - w - 4)) + "px";
+  el.style.top = Math.max(4, Math.min(y, window.innerHeight - hgt - 4)) + "px";
+  ctxMenu.closer = (e) => { if (!el.contains(e.target)) closeCtxMenu(); };
+  ctxMenu.keyer = (e) => { if (e.key === "Escape") closeCtxMenu(); };
+  ctxMenu.scroller = () => closeCtxMenu();
+  setTimeout(() => {
+    document.addEventListener("pointerdown", ctxMenu.closer, true);
+    window.addEventListener("keydown", ctxMenu.keyer);
+    window.addEventListener("scroll", ctxMenu.scroller, true);
+  }, 0);
 }
 
 const state = { progress: { value: 0, max: 0 }, runningNode: null };
@@ -225,7 +280,7 @@ function lbClose() {
 function ensureLightbox() {
   if (lb.overlay) return;
   injectStyle();
-  const img = h("img", { class: "cqp-lb-img" });
+  const img = h("img", { class: "cqp-lb-img", oncontextmenu: (e) => { e.preventDefault(); openImageMenu(e.clientX, e.clientY, { item: lb.items[lb.index], allowView: false }); } });
   const stage = h("div", { class: "cqp-lb-stage" }, [img]);
   const counter = h("div", { class: "cqp-lb-counter" });
   const dl = h("a", { class: "cqp-btn", text: "Download", href: "#", target: "_blank", onClick: (e) => e.stopPropagation() });
@@ -529,7 +584,7 @@ function renderHistoryList(scroll, history, refresh) {
     if (items.length) {
       const strip = h("div", { class: "cqp-strip" });
       items.forEach((it, i) => {
-        strip.appendChild(h("img", { class: "cqp-tn", src: it.url, loading: "lazy", decoding: "async", title: it.filename, onClick: () => openLightbox(items, i) }));
+        strip.appendChild(h("img", { class: "cqp-tn", src: it.url, loading: "lazy", decoding: "async", title: it.filename, onClick: () => openLightbox(items, i), oncontextmenu: (e) => { e.preventDefault(); openImageMenu(e.clientX, e.clientY, { item: it, list: items, index: i, allowView: true }); } }));
       });
       card.appendChild(strip);
     } else if (!ok) {
@@ -575,7 +630,7 @@ function renderFeed(scroll, history) {
   }
   const grid = h("div", { class: "cqp-feed" });
   all.forEach((it, i) => {
-    grid.appendChild(h("img", { src: it.url, loading: "lazy", decoding: "async", title: it.filename, onClick: () => openLightbox(all, i) }));
+    grid.appendChild(h("img", { src: it.url, loading: "lazy", decoding: "async", title: it.filename, onClick: () => openLightbox(all, i), oncontextmenu: (e) => { e.preventDefault(); openImageMenu(e.clientX, e.clientY, { item: it, list: all, index: i, allowView: true }); } }));
   });
   scroll.appendChild(grid);
 }
