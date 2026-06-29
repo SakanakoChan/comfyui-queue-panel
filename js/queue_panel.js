@@ -60,6 +60,8 @@ const CSS = `
 .cqp-lb.open{display:flex;}
 .cqp-lb-stage{width:calc(var(--cqp-lb,90)*1vw);height:calc(var(--cqp-lb,90)*1vh);display:flex;align-items:center;justify-content:center;}
 .cqp-lb-img{width:100%;height:100%;object-fit:contain;}
+.cqp-lb-img.cqp-zoomed{cursor:grab;}
+.cqp-lb-img.cqp-dragging{cursor:grabbing;}
 .cqp-lb-nav{position:absolute;top:50%;transform:translateY(-50%);font-size:40px;line-height:1;color:#fff;background:rgba(0,0,0,.3);border:0;cursor:pointer;padding:8px 14px;border-radius:8px;}
 .cqp-lb-nav:hover{background:rgba(0,0,0,.6);}
 .cqp-lb-prev{left:16px;}
@@ -241,11 +243,34 @@ function pruneStartTimes(queue) {
 let cacheQueue = null;
 let cacheHistory = null;
 
-const lb = { overlay: null, img: null, counter: null, dl: null, items: [], index: 0, keyHandler: null };
+const lb = { overlay: null, img: null, counter: null, dl: null, items: [], index: 0, keyHandler: null, scale: 1, tx: 0, ty: 0, dragging: false };
+const LB_MIN = 1, LB_MAX = 10, LB_WHEEL = 1.15;
+function lbApplyTransform() {
+  if (!lb.img) return;
+  lb.img.style.transform = `translate(${lb.tx}px, ${lb.ty}px) scale(${lb.scale})`;
+  lb.img.classList.toggle("cqp-zoomed", lb.scale > 1);
+}
+function lbResetZoom() {
+  lb.scale = 1; lb.tx = 0; lb.ty = 0;
+  lbApplyTransform();
+}
+function lbZoomAt(newScale, cx, cy) {
+  newScale = Math.max(LB_MIN, Math.min(LB_MAX, newScale));
+  if (newScale <= LB_MIN) { lbResetZoom(); return; }
+  const rect = lb.img.getBoundingClientRect();
+  const ox = cx - (rect.left + rect.width / 2);
+  const oy = cy - (rect.top + rect.height / 2);
+  const k = newScale / lb.scale;
+  lb.tx -= ox * (k - 1);
+  lb.ty -= oy * (k - 1);
+  lb.scale = newScale;
+  lbApplyTransform();
+}
 
 function lbRender() {
   const it = lb.items[lb.index];
   if (!it) return;
+  lbResetZoom();
   lb.counter.textContent = `${lb.index + 1} / ${lb.items.length}`;
   lb.dl.href = it.url;
   lb.dl.download = it.filename || "image";
@@ -296,6 +321,40 @@ function ensureLightbox() {
   const next = h("button", { class: "cqp-lb-nav cqp-lb-next", text: "\u203A", onClick: (e) => { e.stopPropagation(); lbStep(1); } });
   const overlay = h("div", { class: "cqp-lb" }, [prev, stage, next, bar]);
   overlay.addEventListener("click", (e) => { if (e.target === overlay || e.target === stage) lbClose(); });
+  img.draggable = false;
+  overlay.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? LB_WHEEL : 1 / LB_WHEEL;
+    lbZoomAt(lb.scale * factor, e.clientX, e.clientY);
+  }, { passive: false });
+  img.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || lb.scale <= 1) return;
+    lb.dragging = true;
+    lb.dragStartX = e.clientX; lb.dragStartY = e.clientY;
+    lb.startTx = lb.tx; lb.startTy = lb.ty;
+    try { img.setPointerCapture(e.pointerId); } catch (err) {}
+    img.classList.add("cqp-dragging");
+    e.preventDefault();
+  });
+  img.addEventListener("pointermove", (e) => {
+    if (!lb.dragging) return;
+    lb.tx = lb.startTx + (e.clientX - lb.dragStartX);
+    lb.ty = lb.startTy + (e.clientY - lb.dragStartY);
+    lbApplyTransform();
+  });
+  const endDrag = (e) => {
+    if (!lb.dragging) return;
+    lb.dragging = false;
+    img.classList.remove("cqp-dragging");
+    try { img.releasePointerCapture(e.pointerId); } catch (err) {}
+  };
+  img.addEventListener("pointerup", endDrag);
+  img.addEventListener("pointercancel", endDrag);
+  img.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    if (lb.scale > 1) lbResetZoom();
+    else lbZoomAt(2, e.clientX, e.clientY);
+  });
   document.body.appendChild(overlay);
   lb.overlay = overlay; lb.img = img; lb.counter = counter; lb.dl = dl;
 }
