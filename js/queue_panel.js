@@ -187,6 +187,25 @@ function downloadUrl(url, filename) {
   a.click();
   a.remove();
 }
+async function saveAsUrl(url, filename) {
+  if (typeof window !== "undefined" && window.showSaveFilePicker) {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const handle = await window.showSaveFilePicker({ suggestedName: filename || "image.png" });
+      const writable = await handle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } catch (e) {
+      if (e.name !== "AbortError") {
+        console.error("[QueuePanel] saveAsUrl failed", e);
+        downloadUrl(url, filename);
+      }
+    }
+  } else {
+    downloadUrl(url, filename);
+  }
+}
 
 const ctxMenu = { el: null, closer: null, keyer: null, scroller: null };
 function closeCtxMenu() {
@@ -215,6 +234,7 @@ function openImageMenu(x, y, opts) {
   addItem("Load workflow", () => loadWorkflowForItem(item));
   addItem("Open", () => window.open(item.url, "_blank"));
   addItem("Download", () => downloadUrl(item.url, item.filename));
+  addItem("Save as", () => saveAsUrl(item.url, item.filename));
   el.classList.add("open");
   const w = el.offsetWidth, hgt = el.offsetHeight;
   el.style.left = Math.max(4, Math.min(x, window.innerWidth - w - 4)) + "px";
